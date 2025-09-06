@@ -5,7 +5,7 @@
 #include <sys/wait.h>
 
 /* constants */
-const char prompt[16] = "erik@15t-dy100>";
+const char prompt[16] = "erik@15t-dy100";
 const int MAXLINE = 1024;
 const int verbose = 1;
 
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
     char cmdline[MAXLINE];
 
     while (1) {
-        printf("%s ", prompt);
+        printf("\e[0;36m%s\e[0m> ", prompt);
         fflush(stdout);
 
         /* handle errors and end of file */
