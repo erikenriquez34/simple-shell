@@ -3,12 +3,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 /* global */
-const char prompt[16] = "erik@15t-dy100";
+#define PROMPT "\e[0;36merik@15t-dy100\e[0m> "
 #define MAXLINE 1024
 #define MAXJOBS 16
-#define MAXJID 1<<16;
+#define MAXJID 1<<16
+#define VB "[\e[0;31mVerbose\e[0m]"
 int verbose = 0;
 int nextjid = 1; 
 
@@ -29,6 +31,9 @@ struct job_t jobs[MAXJOBS]; /* The job list */
 /* function prototypes */
 int builtin_cmd(char** argv);
 void eval(char* cmdline);
+
+void sigchld_handler(int sig);
+
 void clearjob(struct job_t* job);
 void initjobs(struct job_t* jobs);
 int maxjid(struct job_t* jobs);
@@ -113,6 +118,7 @@ int main(int argc, char** argv) {
 				break;
 
 			case 'v': /* verbose mode */
+				printf("%s%s Toggled verbose mode.\n", PROMPT, VB);
 				verbose = 1;
 				break;
 
@@ -123,9 +129,10 @@ int main(int argc, char** argv) {
 
 	/* init */
 	initjobs(jobs);
+	signal(SIGCHLD, sigchld_handler);
 	
     while (1) {
-        printf("\e[0;36m%s\e[0m> ", prompt);
+        printf(PROMPT);
         fflush(stdout);
 
         /* handle errors and end of file */
@@ -137,6 +144,33 @@ int main(int argc, char** argv) {
         /* strip command line*/
         cmdline[strcspn(cmdline, "\n")] = '\0';
         eval(cmdline);
+    }
+}
+
+/*
+ * sigchld_handler - The kernel sends a SIGCHLD to the shell whenever
+ *     a child job terminates (becomes a zombie), or stops because it
+ *     received a SIGSTOP or SIGTSTP signal. The handler reaps all
+ *     available zombie children, but doesn't wait for any other
+ *     currently running children to terminate.
+ */
+void sigchld_handler(int sig) {
+    pid_t pid;
+    int status;
+
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+		/* Child terminated normally or by signal → delete job */
+        if (WIFEXITED(status) || WIFSIGNALED(status)) {
+            deletejob(jobs, pid);
+			if (verbose) {printf("\n%s Deleted job with pid=%d by SIGCHLD.\n", VB, pid);}
+		/* Child stopped → mark job as stopped */
+        } else if (WIFSTOPPED(status)) {
+            struct job_t *job = getjobpid(jobs, pid);
+            if (job != NULL) {
+                job->state = ST;
+                printf("Job [%d] (%d) stopped\n", job->jid, pid);
+            }
+        }
     }
 }
 
@@ -182,7 +216,7 @@ int addjob(struct job_t* jobs, pid_t pid, int state, char* cmdline) {
 				nextjid = 1;
 			strcpy(jobs[i].cmdline, cmdline);
 			if(verbose){
-				printf("[Verbose] Added job [%d] %d %s\n", jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
+				printf("%s%s Added job [%d] %d %s\n", PROMPT, VB, jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
 			}
 			return 1;
 		}
