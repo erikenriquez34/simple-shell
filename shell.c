@@ -33,6 +33,8 @@ int builtin_cmd(char** argv);
 void eval(char* cmdline);
 
 void sigchld_handler(int sig);
+void sigint_handler(int sig);
+void sigtstp_handler(int sig);
 
 void clearjob(struct job_t* job);
 void initjobs(struct job_t* jobs);
@@ -89,6 +91,7 @@ void eval(char* cmdline) {
 
     /* if forked process, use exec to run command. Parent proceed to bg flag check */
     if ((pid = fork()) == 0) {
+		setpgid(0, 0);
         if (execvp(argv[0], argv) < 0) {
             printf("%s: Command not found.\n", argv[0]);
             exit(0);
@@ -98,8 +101,20 @@ void eval(char* cmdline) {
     /* use bg to either wait or run in background*/
     if (!bg) {
 		addjob(jobs, pid, FG, cmdline);
-        waitpid(pid, NULL, 0);
-		deletejob(jobs, pid);
+
+        int status; /* stopped by ctrl+z, return control */
+		if (waitpid(pid, &status, WUNTRACED) > 0) {
+			if (WIFSTOPPED(status)) {
+				struct job_t *job = getjobpid(jobs, pid);
+				if (job) {
+					job->state = ST;
+					printf("Job [%d] (%d) stopped by signal %d\n",
+						job->jid, pid, WSTOPSIG(status));
+				}
+			} else { /* process completed, kill */
+				deletejob(jobs, pid);
+			}
+		}
     } else {
 		addjob(jobs, pid, BG, cmdline);
         printf("[%d] (%d) %s\n", pid2jid(pid), pid, cmdline);
@@ -130,6 +145,8 @@ int main(int argc, char** argv) {
 	/* init */
 	initjobs(jobs);
 	signal(SIGCHLD, sigchld_handler);
+	signal(SIGTSTP, sigtstp_handler);
+	signal(SIGINT, sigint_handler);
 	
     while (1) {
         printf(PROMPT);
@@ -158,7 +175,7 @@ void sigchld_handler(int sig) {
     pid_t pid;
     int status;
 
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
 		/* Child terminated normally or by signal → delete job */
         if (WIFEXITED(status) || WIFSIGNALED(status)) {
             deletejob(jobs, pid);
@@ -171,6 +188,32 @@ void sigchld_handler(int sig) {
                 printf("Job [%d] (%d) stopped\n", job->jid, pid);
             }
         }
+    }
+}
+
+/*
+ * sigint_handler - The kernel sends a SIGINT to the shell whenver the
+ *    user types ctrl-c at the keyboard.  Catch it and send it along
+ *    to the foreground job.
+ */
+void sigint_handler(int sig) {
+	pid_t pid = fgpid(jobs);
+    if (pid != 0) {
+		/*-pid sends interrupt to group*/
+        kill(-pid, SIGINT);
+    }
+}
+
+/*
+ * sigtstp_handler - The kernel sends a SIGTSTP to the shell whenever
+ *     the user types ctrl-z at the keyboard. Catch it and suspend the
+ *     foreground job by sending it a SIGTSTP.
+ */
+void sigtstp_handler(int sig) {
+    pid_t pid = fgpid(jobs);
+    if (pid != 0) {
+		/*-pid sends  to group*/
+        kill(-pid, SIGTSTP);
     }
 }
 
