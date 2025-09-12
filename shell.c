@@ -31,6 +31,7 @@ struct job_t jobs[MAXJOBS]; /* The job list */
 /* function prototypes */
 int builtin_cmd(char** argv);
 void eval(char* cmdline);
+void waitfg(pid_t pid);
 
 void sigchld_handler(int sig);
 void sigint_handler(int sig);
@@ -50,10 +51,51 @@ void usage(void);
 
 /* builtin_cmd - If the user has typed a built-in command then execute immediately*/
 int builtin_cmd(char** argv) {
-    if (strcmp(argv[0], "quit") == 0 || strcmp(argv[0], "exit") == 0) {
+    if (strcmp(argv[0], "quit") == 0 || strcmp(argv[0], "exit") == 0) { /* exit */
         exit(0);
-    } else if (strcmp(argv[0], "jobs") == 0) {
+    } else if (strcmp(argv[0], "jobs") == 0) { /* view jobs */
     	listjobs(jobs);
+		return 1;
+	} else if (strcmp(argv[0], "fg") == 0) { /* set fg process */
+		if (argv[1] == NULL) {
+			printf("fg command requires %%jobid argument\n");
+			return 1;
+		}
+		if (argv[1][0] != '%') {
+			printf("fg argument must be %%jobid\n");
+			return 1;
+		}
+		int jid = atoi(&argv[1][1]);
+		struct job_t *job = getjobjid(jobs, jid);
+		if (job == NULL) {
+			printf("%%%d: No such job\n", jid);
+			return 1;
+		}
+		kill(-job->pid, SIGCONT); /* signal continues the job */
+		job->state = FG;
+		waitfg(job->pid);
+		return 1;
+	} else if (strcmp(argv[0], "bg") == 0) { /* begin but keep running in background */
+		if (argv[1] == NULL) {
+			printf("bg command requires %%jobid argument\n");
+			return 1;
+		}
+		if (argv[1][0] != '%') {
+			printf("bg argument must be %%jobid\n");
+			return 1;
+		}
+
+		int jid = atoi(&argv[1][1]);
+		struct job_t *job = getjobjid(jobs, jid);
+		if (job == NULL) {
+			printf("%%%d: No such job\n", jid);
+			return 1;
+		}
+
+		kill(-job->pid, SIGCONT); /* continues the job */
+		job->state = BG;
+		printf("[%d] (%d) %s\n", job->jid, job->pid, job->cmdline);
+		return 1;
 	}
 	return 0;
 }
@@ -86,29 +128,29 @@ void eval(char* cmdline) {
         argv[argc-1] = NULL;
     }
 
-    /* builtin commands */
-    builtin_cmd(argv);
-
-    /* if forked process, use exec to run command. Parent proceed to bg flag check */
-    if ((pid = fork()) == 0) {
-		setpgid(0, 0);
-        if (execvp(argv[0], argv) < 0) {
-            printf("%s: Command not found.\n", argv[0]);
-            exit(0);
-        }
-    }
+    /* check builtins first, then check others. I think this works could be problematic*/
+    if (!builtin_cmd(argv)) {
+		/* if forked process, use exec to run command. Parent proceed to bg flag check */
+		if ((pid = fork()) == 0) {
+			setpgid(0, 0);
+			if (execvp(argv[0], argv) < 0) {
+				printf("%s: Command not found.\n", argv[0]);
+				exit(0);
+			}
+		}
+	}
 
     /* use bg to either wait or run in background*/
     if (!bg) {
 		addjob(jobs, pid, FG, cmdline);
 
-        int status; /* stopped by ctrl+z, return control */
+        int status; /* if stopped by ctrl+z, return control */
 		if (waitpid(pid, &status, WUNTRACED) > 0) {
 			if (WIFSTOPPED(status)) {
 				struct job_t *job = getjobpid(jobs, pid);
 				if (job) {
 					job->state = ST;
-					printf("Job [%d] (%d) stopped by signal %d\n",
+					printf("\n[%d] (%d) stopped by signal %d\n",
 						job->jid, pid, WSTOPSIG(status));
 				}
 			} else { /* process completed, kill */
@@ -118,6 +160,23 @@ void eval(char* cmdline) {
     } else {
 		addjob(jobs, pid, BG, cmdline);
         printf("[%d] (%d) %s\n", pid2jid(pid), pid, cmdline);
+    }
+}
+
+void waitfg(pid_t pid) {
+    int status;
+    while (fgpid(jobs) == pid) {
+        /* wait for process */
+        if (waitpid(pid, &status, WUNTRACED) > 0) {
+            if (WIFSTOPPED(status)) {
+                struct job_t *job = getjobpid(jobs, pid);
+                if (job) job->state = ST;
+                break;
+            } else {
+                deletejob(jobs, pid);
+                break;
+            }
+        }
     }
 }
 
@@ -176,11 +235,11 @@ void sigchld_handler(int sig) {
     int status;
 
     while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
-		/* Child terminated normally or by signal → delete job */
+		/* Child terminated normally or by signal then delete job */
         if (WIFEXITED(status) || WIFSIGNALED(status)) {
             deletejob(jobs, pid);
 			if (verbose) {printf("\n%s Deleted job with pid=%d by SIGCHLD.\n", VB, pid);}
-		/* Child stopped → mark job as stopped */
+		/* Child stopped so mark job as stopped */
         } else if (WIFSTOPPED(status)) {
             struct job_t *job = getjobpid(jobs, pid);
             if (job != NULL) {
