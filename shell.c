@@ -30,6 +30,7 @@ struct job_t jobs[MAXJOBS]; /* The job list */
 
 /* function prototypes */
 int builtin_cmd(char** argv);
+void eval_pipeline();
 void eval(char* cmdline);
 void waitfg(pid_t pid);
 
@@ -100,12 +101,18 @@ int builtin_cmd(char** argv) {
 	return 0;
 }
 
+/* specialized run for any lines with pipes */
+void eval_pipeline() {
+    printf("Handle pipe here!\n");
+}
+
 /* evaluate a command line */
 void eval(char* cmdline) {
     char* argv[MAXLINE];
     char buf[MAXLINE];
     pid_t pid;
     int bg = 0;
+	int pipes = 0;
 
     strcpy(buf, cmdline);
 
@@ -114,6 +121,7 @@ void eval(char* cmdline) {
     char* token = strtok(buf, " \t");
     while (token != NULL) {
         argv[argc] = token;
+		if (strcmp(token, "|") == 0) {pipes = 1;}
         token = strtok(NULL, " \t");
         argc++;
     }
@@ -127,6 +135,11 @@ void eval(char* cmdline) {
         bg = 1;
         argv[argc-1] = NULL;
     }
+
+	/* handle pipelines */
+	if (pipes) {
+		eval_pipeline();
+	}
 
     /* check builtins first, then check others. I think this works could be problematic*/
     if (!builtin_cmd(argv)) {
