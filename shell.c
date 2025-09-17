@@ -30,7 +30,7 @@ struct job_t jobs[MAXJOBS]; /* The job list */
 
 /* function prototypes */
 int builtin_cmd(char** argv);
-void eval_pipeline();
+void eval_pipeline(char*** cmds, int num, int bg, char* cmdline);
 void eval(char* cmdline);
 void waitfg(pid_t pid);
 
@@ -102,8 +102,78 @@ int builtin_cmd(char** argv) {
 }
 
 /* specialized run for any lines with pipes */
-void eval_pipeline() {
-    printf("Handle pipe here!\n");
+void eval_pipeline(char*** cmds, int num, int bg, char* cmdline) {
+    int i;
+    int pipes[num-1][2];
+    pid_t pid;
+    pid_t pgid = 0;
+
+    /* create pipes */
+    for (i = 0; i < num-1; i++) {
+        pipe(pipes[i]);
+    }
+
+    for (i = 0; i < num; i++) {
+        pid = fork();
+        if (pid == 0) {
+            if (pgid == 0) pgid = getpid();
+            setpgid(0, pgid);
+
+            /* if NOT first command, make stdin to previous pipe with dup */
+            if (i > 0) {
+                dup2(pipes[i-1][0], STDIN_FILENO);
+            }
+            /* if NOT last command, make stdout to next pipe with dup */
+            if (i < num-1) {
+                dup2(pipes[i][1], STDOUT_FILENO);
+            }
+
+            /* close pipes */
+            for (int j = 0; j < num-1; j++) {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+
+            execvp(cmds[i][0], cmds[i]);
+            printf("%s: Command not found\n", cmds[i][0]);
+            exit(1);
+        } else {
+            if (pgid == 0) pgid = pid; /* first child sets pgid */
+            setpgid(pid, pgid); /* put all in same geoup*/
+        }
+    }
+
+    /* close parent pipes*/
+    for (i = 0; i < num-1; i++) {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+    }
+
+    /* create job to joblist */
+    addjob(jobs, pgid, bg ? BG : FG, cmdline);
+
+	/* wait for all children in this process group */
+    if (!bg) {
+        int status;
+        pid_t wpid;
+        do {
+            wpid = waitpid(-pgid, &status, WUNTRACED);
+            if (wpid > 0 && WIFSTOPPED(status)) {
+                struct job_t *job = getjobpid(jobs, wpid);
+                if (job) job->state = ST;
+                printf("\n[%d] (%d) stopped by signal %d\n",
+                        job->jid, wpid, WSTOPSIG(status));
+                break;
+            }
+        } while (fgpid(jobs) == pgid && wpid > 0);
+
+        /* cleanup when done */
+        if (!WIFSTOPPED(status)) {
+            deletejob(jobs, pgid);
+        }
+    } else {
+        printf("[%d] (%d) %s\n", pid2jid(pgid), pgid, cmdline);
+    }
 }
 
 /* evaluate a command line */
@@ -112,20 +182,19 @@ void eval(char* cmdline) {
     char buf[MAXLINE];
     pid_t pid;
     int bg = 0;
-	int pipes = 0;
+    int numpipes = 0;
 
     strcpy(buf, cmdline);
 
     /* tokenize the line */
     int argc = 0;
     char* token = strtok(buf, " \t");
-    while (token != NULL) {
+    while (token != NULL && argc < MAXLINE-1) {
         argv[argc] = token;
-		if (strcmp(token, "|") == 0) {pipes = 1;}
+        if (strcmp(token, "|") == 0) {numpipes++;}
         token = strtok(NULL, " \t");
         argc++;
     }
-
     argv[argc] = NULL;
 	/* spamming enter or someething */
     if (argv[0] == NULL) {return;}
@@ -136,10 +205,22 @@ void eval(char* cmdline) {
         argv[argc-1] = NULL;
     }
 
-	/* handle pipelines */
-	if (pipes) {
-		eval_pipeline();
-	}
+    /* handle pipelines */
+    if (numpipes > 0) {
+        /* split into subcommands */
+        char** cmds[numpipes+1];
+        int cidx = 0;
+        cmds[cidx] = &argv[0];
+        for (int i = 0; i < argc; i++) {
+            if (argv[i] && strcmp(argv[i], "|") == 0) {
+                argv[i] = NULL; /* end current command */
+                cidx++;
+                cmds[cidx] = &argv[i+1]; /* next starts here */
+            }
+        }
+        eval_pipeline(cmds, numpipes+1, bg, cmdline);
+        return;
+    }
 
     /* check builtins first, then check others. I think this works could be problematic*/
     if (!builtin_cmd(argv)) {
