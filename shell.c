@@ -135,10 +135,12 @@ void eval_pipeline(char*** cmds, int num, int bg, char* cmdline) {
             /* if NOT first command, make stdin to previous pipe with dup */
             if (i > 0) {
                 dup2(pipes[i-1][0], STDIN_FILENO);
+				if (verbose) {fprintf(stderr, "%s%s Process %d stdin is pipe[%d][0]=%d\n", PROMPT, VB, getpid(), i-1, pipes[i-1][0]);}
             }
             /* if NOT last command, make stdout to next pipe with dup */
             if (i < num-1) {
                 dup2(pipes[i][1], STDOUT_FILENO);
+				if (verbose) {fprintf(stderr, "%s%s Process %d stdout is pipe[%d][1]=%d\n", PROMPT, VB, getpid(), i, pipes[i][1]);}
             }
 
             /* close pipes */
@@ -343,7 +345,7 @@ void sigchld_handler(int sig) {
 		/* Child terminated normally or by signal then delete job */
         if (WIFEXITED(status) || WIFSIGNALED(status)) {
             deletejob(jobs, pid);
-			if (verbose) {printf("\n%s Deleted job with pid=%d by SIGCHLD.\n", VB, pid);}
+			if (verbose) {fprintf(stderr, "\n%s Deleted job with pid=%d by SIGCHLD.\n", VB, pid);}
 		/* Child stopped so mark job as stopped */
         } else if (WIFSTOPPED(status)) {
             struct job_t *job = getjobpid(jobs, pid);
@@ -422,7 +424,7 @@ int addjob(struct job_t* jobs, pid_t pid, int state, char* cmdline) {
 			if (nextjid > MAXJOBS)
 				nextjid = 1;
 			strcpy(jobs[i].cmdline, cmdline);
-			if(verbose){
+			if (verbose){
 				printf("%s%s Added job [%d] %d %s\n", PROMPT, VB, jobs[i].jid, jobs[i].pid, jobs[i].cmdline);
 			}
 			return 1;
