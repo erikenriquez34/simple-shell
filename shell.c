@@ -54,7 +54,20 @@ void usage(void);
 int builtin_cmd(char** argv) {
     if (strcmp(argv[0], "quit") == 0 || strcmp(argv[0], "exit") == 0) { /* exit */
         exit(0);
-    } else if (strcmp(argv[0], "jobs") == 0) { /* view jobs */
+    } else if (strcmp(argv[0], "cd") == 0) { /* change directory! */
+		if (argv[1] == NULL) { /* cd nowhere goes home*/
+			char* home = getenv("HOME");
+			if (home == NULL) home = "/";
+			if (chdir(home) < 0) {
+				perror("cd");
+			}
+		} else { /* cd __ absolute or relative*/
+			if (chdir(argv[1]) < 0) {
+				perror("cd");
+			}
+		}
+		return 1;
+	} else if (strcmp(argv[0], "jobs") == 0) { /* view jobs */
     	listjobs(jobs);
 		return 1;
 	} else if (strcmp(argv[0], "fg") == 0) { /* set fg process */
@@ -161,8 +174,7 @@ void eval_pipeline(char*** cmds, int num, int bg, char* cmdline) {
             if (wpid > 0 && WIFSTOPPED(status)) {
                 struct job_t *job = getjobpid(jobs, wpid);
                 if (job) job->state = ST;
-                printf("\n[%d] (%d) stopped by signal %d\n",
-                        job->jid, wpid, WSTOPSIG(status));
+                printf("\n[%d] (%d) stopped by signal %d\n", job->jid, wpid, WSTOPSIG(status));
                 break;
             }
         } while (fgpid(jobs) == pgid && wpid > 0);
@@ -244,8 +256,7 @@ void eval(char* cmdline) {
 				struct job_t *job = getjobpid(jobs, pid);
 				if (job) {
 					job->state = ST;
-					printf("\n[%d] (%d) stopped by signal %d\n",
-						job->jid, pid, WSTOPSIG(status));
+					printf("\n[%d] (%d) stopped by signal %d\n", job->jid, pid, WSTOPSIG(status));
 				}
 			} else { /* process completed, kill */
 				deletejob(jobs, pid);
