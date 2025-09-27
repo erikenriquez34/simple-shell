@@ -237,7 +237,9 @@ void eval(char* cmdline) {
     }
 
     /* check builtins first, then check others. I think this works could be problematic*/
-    if (!builtin_cmd(argv)) {
+    if (builtin_cmd(argv)) {
+		return;
+	} else {
 		/* if forked process, use exec to run command. Parent proceed to bg flag check */
 		if ((pid = fork()) == 0) {
 			setpgid(0, 0);
@@ -345,7 +347,7 @@ void sigchld_handler(int sig) {
 		/* Child terminated normally or by signal then delete job */
         if (WIFEXITED(status) || WIFSIGNALED(status)) {
             deletejob(jobs, pid);
-			if (verbose) {fprintf(stderr, "\n%s Deleted job with pid=%d by SIGCHLD.\n", VB, pid);}
+			if (verbose) {fprintf(stderr, "\n%s Deleted job with pid=%d by SIGCHLD\n", VB, pid);}
 		/* Child stopped so mark job as stopped */
         } else if (WIFSTOPPED(status)) {
             struct job_t *job = getjobpid(jobs, pid);
@@ -443,6 +445,7 @@ int deletejob(struct job_t* jobs, pid_t pid) {
 
 	for (i = 0; i < MAXJOBS; i++) {
 		if (jobs[i].pid == pid) {
+			if (verbose) {printf("%s%s Deleted job [%d]\n", PROMPT, VB, jobs[i].pid);}
 			clearjob(&jobs[i]);
 			nextjid = maxjid(jobs)+1;
 			return 1;
