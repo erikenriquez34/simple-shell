@@ -4,7 +4,7 @@
 A lightweight Unix-like shell built in C for my Operating Systems course.  Supports job control, 
 pipelines, and built-in commands, while keeping the implementation simple and focused on the shell features.
 
-## Features
+## Features:
 - Foreground and background execution (`sleep 5` vs `sleep 5 &`)
 - Job control with `Ctrl-C`, `Ctrl-Z`, `fg`, and `bg`
 - Type `jobs` to view all running/stopped jobs
@@ -12,7 +12,7 @@ pipelines, and built-in commands, while keeping the implementation simple and fo
 - Pipelines (`echo "hello world" | sort | wc -w`)
 - Optional verbose mode for debugging
 
-## Installation (Local Setup)
+## Installation (Local Setup):
 
 Clone the repository:
 ```
@@ -29,3 +29,7 @@ Run the shell:
 ```
 ./shell
 ```
+
+## Screenshots:
+
+<img width="836.25" height="471" alt="shot" src="https://github.com/user-attachments/assets/96a75079-5fa3-4c49-991d-515352fd29ab" />
