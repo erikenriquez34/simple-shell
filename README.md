@@ -1,5 +1,5 @@
 
-# Simple-Shell
+# Simple Shell
 
 A lightweight Unix-like shell built in C for my Operating Systems course.  Supports job control, 
 pipelines, and built-in commands, while keeping the implementation simple and focused on the shell features.
